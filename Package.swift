@@ -164,8 +164,8 @@ let package = Package(
         .library(name: "NIOHTTPTypesHTTP2", targets: ["NIOHTTPTypesHTTP2"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-nio.git", from: "2.67.0"),
-        .package(url: "https://github.com/apple/swift-nio-http2.git", from: "1.27.0"),
+        .package(url: "https://github.com/chkp-aviads/swift-nio.git", branch: "main"),
+        .package(url: "https://github.com/chkp-aviads/swift-nio-http2.git", branch: "main"),
         .package(url: "https://github.com/apple/swift-docc-plugin", from: "1.0.0"),
         .package(url: "https://github.com/apple/swift-http-types", from: "1.0.0"),
     ],
