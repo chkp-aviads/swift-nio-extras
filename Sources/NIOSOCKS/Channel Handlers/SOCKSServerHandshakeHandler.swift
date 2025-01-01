@@ -69,7 +69,7 @@ public final class SOCKSServerHandshakeHandler: ChannelDuplexHandler, RemovableC
     /// Remove handler from channel pipeline.  Causes any inbound buffer to be surfaced.
     /// - Parameter context:  Calling context.
     public func handlerRemoved(context: ChannelHandlerContext) {
-        guard let buffer = self.inboundBuffer else {
+        guard let buffer = self.inboundBuffer, buffer.readableBytes > 0 else {
             return
         }
         context.fireChannelRead(.init(buffer))
