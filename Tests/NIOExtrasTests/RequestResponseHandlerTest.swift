@@ -12,10 +12,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-import XCTest
 import NIOCore
 import NIOEmbedded
 import NIOExtras
+import XCTest
 
 class RequestResponseHandlerTest: XCTestCase {
     private var eventLoop: EmbeddedEventLoop!
@@ -41,7 +41,7 @@ class RequestResponseHandlerTest: XCTestCase {
     }
 
     func testSimpleRequestWorks() {
-        XCTAssertNoThrow(try self.channel.pipeline.addHandler(RequestResponseHandler<IOData, String>()).wait())
+        XCTAssertNoThrow(try self.channel.pipeline.syncOperations.addHandler(RequestResponseHandler<IOData, String>()))
         self.buffer.writeString("hello")
 
         // pretend to connect to the EmbeddedChannel knows it's supposed to be active
@@ -62,7 +62,7 @@ class RequestResponseHandlerTest: XCTestCase {
 
     func testEnqueingMultipleRequestsWorks() throws {
         struct DummyError: Error {}
-        XCTAssertNoThrow(try self.channel.pipeline.addHandler(RequestResponseHandler<IOData, Int>()).wait())
+        XCTAssertNoThrow(try self.channel.pipeline.syncOperations.addHandler(RequestResponseHandler<IOData, Int>()))
 
         var futures: [EventLoopFuture<Int>] = []
         // pretend to connect to the EmbeddedChannel knows it's supposed to be active
@@ -114,7 +114,7 @@ class RequestResponseHandlerTest: XCTestCase {
 
     func testRequestsEnqueuedAfterErrorAreFailed() {
         struct DummyError: Error {}
-        XCTAssertNoThrow(try self.channel.pipeline.addHandler(RequestResponseHandler<IOData, Void>()).wait())
+        XCTAssertNoThrow(try self.channel.pipeline.syncOperations.addHandler(RequestResponseHandler<IOData, Void>()))
 
         self.channel.pipeline.fireErrorCaught(DummyError())
 
@@ -131,7 +131,7 @@ class RequestResponseHandlerTest: XCTestCase {
         struct DummyError1: Error {}
         struct DummyError2: Error {}
 
-        XCTAssertNoThrow(try self.channel.pipeline.addHandler(RequestResponseHandler<IOData, Void>()).wait())
+        XCTAssertNoThrow(try self.channel.pipeline.syncOperations.addHandler(RequestResponseHandler<IOData, Void>()))
 
         let p: EventLoopPromise<Void> = self.eventLoop.makePromise()
         // right now, everything's still okay so the enqueued request won't immediately be failed
@@ -143,7 +143,6 @@ class RequestResponseHandlerTest: XCTestCase {
         // we'll also fire a second error through the pipeline that shouldn't do anything
         self.channel.pipeline.fireErrorCaught(DummyError2())
 
-
         // and just after the error, the response arrives too (but too late)
         XCTAssertNoThrow(try self.channel.writeInbound(()))
 
@@ -153,7 +152,7 @@ class RequestResponseHandlerTest: XCTestCase {
     }
 
     func testClosedConnectionFailsOutstandingPromises() {
-        XCTAssertNoThrow(try self.channel.pipeline.addHandler(RequestResponseHandler<String, Void>()).wait())
+        XCTAssertNoThrow(try self.channel.pipeline.syncOperations.addHandler(RequestResponseHandler<String, Void>()))
 
         let promise = self.eventLoop.makePromise(of: Void.self)
         XCTAssertNoThrow(try self.channel.writeOutbound(("Hello!", promise)))

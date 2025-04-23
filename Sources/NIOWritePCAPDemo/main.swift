@@ -13,38 +13,49 @@
 //===----------------------------------------------------------------------===//
 
 import NIOCore
-import NIOPosix
 import NIOExtras
 import NIOHTTP1
+import NIOPosix
 
 class SendSimpleRequestHandler: ChannelInboundHandler {
     typealias InboundIn = HTTPClientResponsePart
     typealias OutboundOut = HTTPClientRequestPart
-    
+
     private let allDonePromise: EventLoopPromise<ByteBuffer>
-    
+
     init(allDonePromise: EventLoopPromise<ByteBuffer>) {
         self.allDonePromise = allDonePromise
     }
-    
+
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         if case .body(let body) = self.unwrapInboundIn(data) {
             self.allDonePromise.succeed(body)
         }
     }
-    
+
     func errorCaught(context: ChannelHandlerContext, error: Error) {
         self.allDonePromise.fail(error)
         context.close(promise: nil)
     }
-    
+
     func channelActive(context: ChannelHandlerContext) {
-        let headers = HTTPHeaders([("host", "httpbin.org"),
-                                   ("accept", "application/json")])
-        context.write(self.wrapOutboundOut(.head(.init(version: .init(major: 1, minor: 1),
-                                                       method: .GET,
-                                                       uri: "/delay/0.2",
-                                                       headers: headers))), promise: nil)
+        let headers = HTTPHeaders([
+            ("host", "httpbin.org"),
+            ("accept", "application/json"),
+        ])
+        context.write(
+            self.wrapOutboundOut(
+                .head(
+                    .init(
+                        version: .init(major: 1, minor: 1),
+                        method: .GET,
+                        uri: "/delay/0.2",
+                        headers: headers
+                    )
+                )
+            ),
+            promise: nil
+        )
         context.writeAndFlush(self.wrapOutboundOut(.end(nil)), promise: nil)
     }
 }
@@ -66,10 +77,11 @@ defer {
 let allDonePromise = group.next().makePromise(of: ByteBuffer.self)
 let connection = try ClientBootstrap(group: group.next())
     .channelInitializer { channel in
-        return channel.pipeline.addHandler(NIOWritePCAPHandler(mode: .client, fileSink: fileSink.write)).flatMap {
-            channel.pipeline.addHTTPClientHandlers()
-        }.flatMap {
-            channel.pipeline.addHandler(SendSimpleRequestHandler(allDonePromise: allDonePromise))
+        channel.eventLoop.makeCompletedFuture {
+            let sync = channel.pipeline.syncOperations
+            try sync.addHandler(NIOWritePCAPHandler(mode: .client, fileSink: fileSink.write))
+            try sync.addHTTPClientHandlers()
+            try sync.addHandlers(SendSimpleRequestHandler(allDonePromise: allDonePromise))
         }
     }
     .connect(host: "httpbin.org", port: 80)

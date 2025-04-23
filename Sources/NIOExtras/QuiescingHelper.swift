@@ -106,7 +106,10 @@ private final class ChannelCollector {
             if openChannels.isEmpty {
                 self.shutdownCompleted()
             } else {
-                self.lifecycleState = .shuttingDown(openChannels: openChannels, fullyShutdownPromise: fullyShutdownPromise)
+                self.lifecycleState = .shuttingDown(
+                    openChannels: openChannels,
+                    fullyShutdownPromise: fullyShutdownPromise
+                )
             }
 
         case .shutdownCompleted:
@@ -203,8 +206,8 @@ private final class CollectAcceptedChannelsHandler: ChannelInboundHandler {
         do {
             try self.channelCollector.channelAdded(channel)
             let closeFuture = channel.closeFuture
-            closeFuture.whenComplete { (_: Result<Void, Error>) in
-                self.channelCollector.channelRemoved(channel)
+            closeFuture.whenComplete { [channelCollector = self.channelCollector] _ in
+                channelCollector.channelRemoved(channel)
             }
             context.fireChannelRead(data)
         } catch ShutdownError.alreadyShutdown {

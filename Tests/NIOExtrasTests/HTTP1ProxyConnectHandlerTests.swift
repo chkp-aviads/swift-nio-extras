@@ -12,11 +12,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-@testable import NIOExtras
 import NIOCore
 import NIOEmbedded
 import NIOHTTP1
 import XCTest
+
+@testable import NIOExtras
 
 class HTTP1ProxyConnectHandlerTests: XCTestCase {
     func testProxyConnectWithoutAuthorizationSuccess() throws {
@@ -60,7 +61,7 @@ class HTTP1ProxyConnectHandlerTests: XCTestCase {
         let proxyConnectHandler = NIOHTTP1ProxyConnectHandler(
             targetHost: "swift.org",
             targetPort: 443,
-            headers: ["proxy-authorization" : "Basic abc123"],
+            headers: ["proxy-authorization": "Basic abc123"],
             deadline: .now() + .seconds(10),
             promise: promise
         )
@@ -213,16 +214,23 @@ class HTTP1ProxyConnectHandlerTests: XCTestCase {
 
         // write a request to be buffered inside the ProxyConnectHandler
         // it will be unbuffered when the handler completes and removes itself
-        let requestHead = HTTPRequestHead(version: HTTPVersion(major: 1, minor: 1), method: .GET, uri: "http://apple.com")
+        let requestHead = HTTPRequestHead(
+            version: HTTPVersion(major: 1, minor: 1),
+            method: .GET,
+            uri: "http://apple.com"
+        )
         var promises: [EventLoopPromise<Void>] = []
         promises.append(embedded.eventLoop.makePromise())
-        embedded.pipeline.write(NIOAny(HTTPClientRequestPart.head(requestHead)), promise: promises.last)
+        embedded.pipeline.write(HTTPClientRequestPart.head(requestHead), promise: promises.last)
 
         promises.append(embedded.eventLoop.makePromise())
-        embedded.pipeline.write(NIOAny(HTTPClientRequestPart.body(.byteBuffer(ByteBuffer(string: "Test")))), promise: promises.last)
+        embedded.pipeline.write(
+            HTTPClientRequestPart.body(.byteBuffer(ByteBuffer(string: "Test"))),
+            promise: promises.last
+        )
 
         promises.append(embedded.eventLoop.makePromise())
-        embedded.pipeline.write(NIOAny(HTTPClientRequestPart.end(nil)), promise: promises.last)
+        embedded.pipeline.write(HTTPClientRequestPart.end(nil), promise: promises.last)
         embedded.pipeline.flush()
 
         // read the connect header back
@@ -283,13 +291,16 @@ class HTTP1ProxyConnectHandlerTests: XCTestCase {
         let requestHead = HTTPRequestHead(version: HTTPVersion(major: 1, minor: 1), method: .GET, uri: "apple.com")
         var promises: [EventLoopPromise<Void>] = []
         promises.append(embedded.eventLoop.makePromise())
-        embedded.pipeline.write(NIOAny(HTTPClientRequestPart.head(requestHead)), promise: promises.last)
+        embedded.pipeline.write(HTTPClientRequestPart.head(requestHead), promise: promises.last)
 
         promises.append(embedded.eventLoop.makePromise())
-        embedded.pipeline.write(NIOAny(HTTPClientRequestPart.body(.byteBuffer(ByteBuffer(string: "Test")))), promise: promises.last)
+        embedded.pipeline.write(
+            HTTPClientRequestPart.body(.byteBuffer(ByteBuffer(string: "Test"))),
+            promise: promises.last
+        )
 
         promises.append(embedded.eventLoop.makePromise())
-        embedded.pipeline.write(NIOAny(HTTPClientRequestPart.end(nil)), promise: promises.last)
+        embedded.pipeline.write(HTTPClientRequestPart.end(nil), promise: promises.last)
         embedded.pipeline.flush()
 
         // read the connect header back

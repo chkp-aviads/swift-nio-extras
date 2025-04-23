@@ -48,41 +48,65 @@ final class NIOHTTPTypesHTTP1Tests: XCTestCase {
         super.tearDown()
     }
 
-    static let request = HTTPRequest(method: .get, scheme: "https", authority: "www.example.com", path: "/", headerFields: [
-        .accept: "*/*",
-        .acceptEncoding: "gzip",
-        .acceptEncoding: "br",
-        .cookie: "a=b",
-        .cookie: "c=d",
-        .trailer: "X-Foo",
-    ])
+    static let request = HTTPRequest(
+        method: .get,
+        scheme: "https",
+        authority: "www.example.com",
+        path: "/",
+        headerFields: [
+            .accept: "*/*",
+            .acceptEncoding: "gzip",
+            .acceptEncoding: "br",
+            .cookie: "a=b",
+            .cookie: "c=d",
+            .trailer: "X-Foo",
+        ]
+    )
 
-    static let requestNoSplitCookie = HTTPRequest(method: .get, scheme: "https", authority: "www.example.com", path: "/", headerFields: [
-        .accept: "*/*",
-        .acceptEncoding: "gzip",
-        .acceptEncoding: "br",
-        .cookie: "a=b; c=d",
-        .trailer: "X-Foo",
-    ])
+    static let requestNoSplitCookie = HTTPRequest(
+        method: .get,
+        scheme: "https",
+        authority: "www.example.com",
+        path: "/",
+        headerFields: [
+            .accept: "*/*",
+            .acceptEncoding: "gzip",
+            .acceptEncoding: "br",
+            .cookie: "a=b; c=d",
+            .trailer: "X-Foo",
+        ]
+    )
 
-    static let oldRequest = HTTPRequestHead(version: .http1_1, method: .GET, uri: "/", headers: [
-        "Host": "www.example.com",
-        "Accept": "*/*",
-        "Accept-Encoding": "gzip",
-        "Accept-Encoding": "br",
-        "Cookie": "a=b; c=d",
-        "Trailer": "X-Foo",
-    ])
+    static let oldRequest = HTTPRequestHead(
+        version: .http1_1,
+        method: .GET,
+        uri: "/",
+        headers: [
+            "Host": "www.example.com",
+            "Accept": "*/*",
+            "Accept-Encoding": "gzip",
+            "Accept-Encoding": "br",
+            "Cookie": "a=b; c=d",
+            "Trailer": "X-Foo",
+        ]
+    )
 
-    static let response = HTTPResponse(status: .ok, headerFields: [
-        .server: "HTTPServer/1.0",
-        .trailer: "X-Foo",
-    ])
+    static let response = HTTPResponse(
+        status: .ok,
+        headerFields: [
+            .server: "HTTPServer/1.0",
+            .trailer: "X-Foo",
+        ]
+    )
 
-    static let oldResponse = HTTPResponseHead(version: .http1_1, status: .ok, headers: [
-        "Server": "HTTPServer/1.0",
-        "Trailer": "X-Foo",
-    ])
+    static let oldResponse = HTTPResponseHead(
+        version: .http1_1,
+        status: .ok,
+        headers: [
+            "Server": "HTTPServer/1.0",
+            "Trailer": "X-Foo",
+        ]
+    )
 
     static let trailers: HTTPFields = [.xFoo: "Bar"]
 
@@ -91,7 +115,7 @@ final class NIOHTTPTypesHTTP1Tests: XCTestCase {
     func testClientHTTP1ToHTTP() throws {
         let recorder = InboundRecorder<HTTPResponsePart>()
 
-        try self.channel.pipeline.addHandlers(HTTP1ToHTTPClientCodec(), recorder).wait()
+        try self.channel.pipeline.syncOperations.addHandlers(HTTP1ToHTTPClientCodec(), recorder)
 
         try self.channel.writeOutbound(HTTPRequestPart.head(Self.request))
         try self.channel.writeOutbound(HTTPRequestPart.end(Self.trailers))
@@ -111,7 +135,7 @@ final class NIOHTTPTypesHTTP1Tests: XCTestCase {
     func testServerHTTP1ToHTTP() throws {
         let recorder = InboundRecorder<HTTPRequestPart>()
 
-        try self.channel.pipeline.addHandlers(HTTP1ToHTTPServerCodec(secure: true), recorder).wait()
+        try self.channel.pipeline.syncOperations.addHandlers(HTTP1ToHTTPServerCodec(secure: true), recorder)
 
         try self.channel.writeInbound(HTTPServerRequestPart.head(Self.oldRequest))
         try self.channel.writeInbound(HTTPServerRequestPart.end(Self.oldTrailers))
@@ -131,7 +155,7 @@ final class NIOHTTPTypesHTTP1Tests: XCTestCase {
     func testClientHTTPToHTTP1() throws {
         let recorder = InboundRecorder<HTTPClientResponsePart>()
 
-        try self.channel.pipeline.addHandlers(HTTPToHTTP1ClientCodec(secure: true), recorder).wait()
+        try self.channel.pipeline.syncOperations.addHandlers(HTTPToHTTP1ClientCodec(secure: true), recorder)
 
         try self.channel.writeOutbound(HTTPClientRequestPart.head(Self.oldRequest))
         try self.channel.writeOutbound(HTTPClientRequestPart.end(Self.oldTrailers))
@@ -151,7 +175,7 @@ final class NIOHTTPTypesHTTP1Tests: XCTestCase {
     func testServerHTTPToHTTP1() throws {
         let recorder = InboundRecorder<HTTPServerRequestPart>()
 
-        try self.channel.pipeline.addHandlers(HTTPToHTTP1ServerCodec(), recorder).wait()
+        try self.channel.pipeline.syncOperations.addHandlers(HTTPToHTTP1ServerCodec(), recorder)
 
         try self.channel.writeInbound(HTTPRequestPart.head(Self.request))
         try self.channel.writeInbound(HTTPRequestPart.end(Self.trailers))

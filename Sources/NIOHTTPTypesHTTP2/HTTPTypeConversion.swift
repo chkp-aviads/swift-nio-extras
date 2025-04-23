@@ -32,8 +32,8 @@ private enum HTTP2TypeConversionError: Error {
     case pseudoFieldInTrailers
 }
 
-private extension HPACKIndexing {
-    init(_ newIndexingStrategy: HTTPField.DynamicTableIndexingStrategy) {
+extension HPACKIndexing {
+    fileprivate init(_ newIndexingStrategy: HTTPField.DynamicTableIndexingStrategy) {
         switch newIndexingStrategy {
         case .avoid: self = .nonIndexable
         case .disallow: self = .neverIndexed
@@ -42,8 +42,8 @@ private extension HPACKIndexing {
     }
 }
 
-private extension HTTPField.DynamicTableIndexingStrategy {
-    init(_ oldIndexing: HPACKIndexing) {
+extension HTTPField.DynamicTableIndexingStrategy {
+    fileprivate init(_ oldIndexing: HPACKIndexing) {
         switch oldIndexing {
         case .indexable: self = .automatic
         case .nonIndexable: self = .avoid
@@ -115,7 +115,7 @@ extension HTTPRequest {
         var i = hpack.startIndex
         while i != hpack.endIndex {
             let (name, value, indexable) = hpack[i]
-            if !name.hasPrefix(":") {
+            if name.utf8.first != UInt8(ascii: ":") {
                 break
             }
             switch name {
@@ -180,7 +180,7 @@ extension HTTPRequest {
         self.headerFields.reserveCapacity(hpack.count)
         while i != hpack.endIndex {
             let (name, value, indexable) = hpack[i]
-            if name.hasPrefix(":") {
+            if name.utf8.first == UInt8(ascii: ":") {
                 throw HTTP2TypeConversionError.pseudoFieldNotFirst
             }
             if let fieldName = HTTPField.Name(name) {
@@ -201,7 +201,7 @@ extension HTTPResponse {
         var i = hpack.startIndex
         while i != hpack.endIndex {
             let (name, value, indexable) = hpack[i]
-            if !name.hasPrefix(":") {
+            if name.utf8.first != UInt8(ascii: ":") {
                 break
             }
             switch name {
@@ -221,7 +221,8 @@ extension HTTPResponse {
             throw HTTP2TypeConversionError.missingStatus
         }
         guard let status = Int(statusString),
-              (0 ... 999).contains(status) else {
+            (0...999).contains(status)
+        else {
             throw HTTP2TypeConversionError.invalidStatus
         }
 
@@ -231,7 +232,7 @@ extension HTTPResponse {
         self.headerFields.reserveCapacity(hpack.count)
         while i != hpack.endIndex {
             let (name, value, indexable) = hpack[i]
-            if name.hasPrefix(":") {
+            if name.utf8.first == UInt8(ascii: ":") {
                 throw HTTP2TypeConversionError.pseudoFieldNotFirst
             }
             if let fieldName = HTTPField.Name(name) {
@@ -250,7 +251,7 @@ extension HTTPFields {
         self.reserveCapacity(trailers.count)
 
         for (name, value, indexable) in trailers {
-            if name.hasPrefix(":") {
+            if name.utf8.first == UInt8(ascii: ":") {
                 throw HTTP2TypeConversionError.pseudoFieldInTrailers
             }
             if let fieldName = HTTPField.Name(name) {

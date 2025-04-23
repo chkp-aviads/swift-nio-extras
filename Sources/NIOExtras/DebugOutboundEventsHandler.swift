@@ -12,15 +12,17 @@
 //
 //===----------------------------------------------------------------------===//
 
+import NIOCore
+
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Musl)
-import Musl
+@preconcurrency import Musl
+#elseif canImport(Android)
+@preconcurrency import Android
 #else
-import Glibc
+@preconcurrency import Glibc
 #endif
-
-import NIOCore
 
 /// ChannelOutboundHandler that prints all outbound events that pass through the pipeline by default,
 /// overridable by providing your own closure for custom logging. See ``DebugInboundEventsHandler`` for inbound events.
@@ -50,12 +52,12 @@ public class DebugOutboundEventsHandler: ChannelOutboundHandler {
         case triggerUserOutboundEvent(event: Any)
     }
 
-    var logger: (Event, ChannelHandlerContext) -> ()
+    var logger: (Event, ChannelHandlerContext) -> Void
 
     /// Initialiser.
     /// - parameters:
     ///     - logger: Method for logging events which happen.
-    public init(logger: @escaping (Event, ChannelHandlerContext) -> () = DebugOutboundEventsHandler.defaultPrint) {
+    public init(logger: @escaping (Event, ChannelHandlerContext) -> Void = DebugOutboundEventsHandler.defaultPrint) {
         self.logger = logger
     }
 
@@ -73,7 +75,7 @@ public class DebugOutboundEventsHandler: ChannelOutboundHandler {
     /// Called to request that the `Channel` bind to a specific `SocketAddress`.
     /// - parameters:
     ///     - context: The `ChannelHandlerContext` which this `ChannelHandler` belongs to.
-    ///     - to: The `SocketAddress` to which this `Channel` should bind.
+    ///     - address: The `SocketAddress` to which this `Channel` should bind.
     ///     - promise: The `EventLoopPromise` which should be notified once the operation completes, or nil if no notification should take place.
     public func bind(context: ChannelHandlerContext, to address: SocketAddress, promise: EventLoopPromise<Void>?) {
         logger(.bind(address: address), context)
@@ -84,7 +86,7 @@ public class DebugOutboundEventsHandler: ChannelOutboundHandler {
     /// Called to request that the `Channel` connect to a given `SocketAddress`.
     /// - parameters:
     ///     - context: The `ChannelHandlerContext` which this `ChannelHandler` belongs to.
-    ///     - to: The `SocketAddress` to which the the `Channel` should connect.
+    ///     - address: The `SocketAddress` to which the the `Channel` should connect.
     ///     - promise: The `EventLoopPromise` which should be notified once the operation completes, or nil if no notification should take place.
     public func connect(context: ChannelHandlerContext, to address: SocketAddress, promise: EventLoopPromise<Void>?) {
         logger(.connect(address: address), context)
@@ -146,7 +148,7 @@ public class DebugOutboundEventsHandler: ChannelOutboundHandler {
     /// Print textual event description to stdout.
     ///  - parameters:
     ///      - event: The ``Event`` to print.
-    ///      - in: The context the event occured in.
+    ///      - context: The context the event occured in.
     public static func defaultPrint(event: Event, in context: ChannelHandlerContext) {
         let message: String
         switch event {
@@ -175,3 +177,6 @@ public class DebugOutboundEventsHandler: ChannelOutboundHandler {
 
 @available(*, unavailable)
 extension DebugOutboundEventsHandler: Sendable {}
+
+@available(*, unavailable)
+extension DebugOutboundEventsHandler.Event: Sendable {}

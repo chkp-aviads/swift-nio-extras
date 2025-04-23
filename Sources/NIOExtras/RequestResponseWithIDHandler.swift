@@ -26,9 +26,11 @@ import NIOCore
 ///
 /// `NIORequestResponseWithIDHandler` does _not_ require that the `Response`s arrive on `Channel` in the same order as
 /// the `Request`s were submitted. They are matched by their `requestID` property (from `NIORequestIdentifiable`).
-public final class NIORequestResponseWithIDHandler<Request: NIORequestIdentifiable,
-                                                   Response: NIORequestIdentifiable>: ChannelDuplexHandler
-                                                  where Request.RequestID == Response.RequestID {
+public final class NIORequestResponseWithIDHandler<
+    Request: NIORequestIdentifiable,
+    Response: NIORequestIdentifiable
+>: ChannelDuplexHandler
+where Request.RequestID == Response.RequestID {
     public typealias InboundIn = Response
     public typealias InboundOut = Never
     public typealias OutboundIn = (Request, EventLoopPromise<Response>)
@@ -78,7 +80,7 @@ public final class NIORequestResponseWithIDHandler<Request: NIORequestIdentifiab
             let promiseBuffer = self.promiseBuffer
             self.promiseBuffer.removeAll()
             self.state = .inactive
-            promiseBuffer.forEach { promise in
+            for promise in promiseBuffer {
                 promise.value.fail(NIOExtrasErrors.ClosedBeforeReceivingResponse())
             }
         }
@@ -94,7 +96,18 @@ public final class NIORequestResponseWithIDHandler<Request: NIORequestIdentifiab
 
         let response = self.unwrapInboundIn(data)
         if let promise = self.promiseBuffer.removeValue(forKey: response.requestID) {
-            promise.succeed(response)
+            // If the event loop of the promise is the same as the context then there's no
+            // change in isolation. Otherwise transfer the response onto the correct event-loop
+            // before succeeding the promise.
+            if promise.futureResult.eventLoop === context.eventLoop {
+                promise.assumeIsolatedUnsafeUnchecked().succeed(response)
+            } else {
+                let unsafeTransfer = UnsafeTransfer(response)
+                promise.futureResult.eventLoop.execute {
+                    let response = unsafeTransfer.wrappedValue
+                    promise.assumeIsolatedUnsafeUnchecked().succeed(response)
+                }
+            }
         } else {
             context.fireErrorCaught(NIOExtrasErrors.ResponseForInvalidRequest<Response>(requestID: response.requestID))
         }
@@ -109,8 +122,8 @@ public final class NIORequestResponseWithIDHandler<Request: NIORequestIdentifiab
         let promiseBuffer = self.promiseBuffer
         self.promiseBuffer.removeAll()
         context.close(promise: nil)
-        promiseBuffer.forEach {
-            $0.value.fail(error)
+        for promise in promiseBuffer {
+            promise.value.fail(error)
         }
     }
 
@@ -132,6 +145,9 @@ public final class NIORequestResponseWithIDHandler<Request: NIORequestIdentifiab
     }
 }
 
+@available(*, unavailable)
+extension NIORequestResponseWithIDHandler: Sendable {}
+
 extension NIOExtrasErrors {
     public struct ResponseForInvalidRequest<Response: NIORequestIdentifiable>: NIOExtrasError, Equatable {
         public var requestID: Response.RequestID
@@ -141,4 +157,3 @@ extension NIOExtrasErrors {
         }
     }
 }
-

@@ -25,7 +25,9 @@ private struct BaseClientCodec {
 
     private var outgoingHTTP1RequestHead: HTTPRequest?
 
-    mutating func processInboundData(_ data: HTTP2Frame.FramePayload) throws -> (first: HTTPResponsePart?, second: HTTPResponsePart?) {
+    mutating func processInboundData(
+        _ data: HTTP2Frame.FramePayload
+    ) throws -> (first: HTTPResponsePart?, second: HTTPResponsePart?) {
         switch data {
         case .headers(let headerContent):
             switch try self.headerStateMachine.newHeaders(block: headerContent.headers) {
@@ -68,13 +70,17 @@ private struct BaseClientCodec {
                 }
             }
             return (first: first, second: second)
-        case .alternativeService, .rstStream, .priority, .windowUpdate, .settings, .pushPromise, .ping, .goAway, .origin:
+        case .alternativeService, .rstStream, .priority, .windowUpdate, .settings, .pushPromise, .ping, .goAway,
+            .origin:
             // These are not meaningful in HTTP messaging, so drop them.
             return (first: nil, second: nil)
         }
     }
 
-    mutating func processOutboundData(_ data: HTTPRequestPart, allocator: ByteBufferAllocator) throws -> HTTP2Frame.FramePayload {
+    mutating func processOutboundData(
+        _ data: HTTPRequestPart,
+        allocator: ByteBufferAllocator
+    ) throws -> HTTP2Frame.FramePayload {
         switch data {
         case .head(let head):
             precondition(self.outgoingHTTP1RequestHead == nil, "Only a single HTTP request allowed per HTTP2 stream")
@@ -85,10 +91,12 @@ private struct BaseClientCodec {
             return .data(HTTP2Frame.FramePayload.Data(data: .byteBuffer(body)))
         case .end(let trailers):
             if let trailers {
-                return .headers(.init(
-                    headers: HPACKHeaders(trailers),
-                    endStream: true
-                ))
+                return .headers(
+                    .init(
+                        headers: HPACKHeaders(trailers),
+                        endStream: true
+                    )
+                )
             } else {
                 return .data(.init(data: .byteBuffer(allocator.buffer(capacity: 0)), endStream: true))
             }
@@ -134,21 +142,37 @@ public final class HTTP2FramePayloadToHTTPClientCodec: ChannelDuplexHandler, Rem
         let requestPart = self.unwrapOutboundIn(data)
 
         do {
-            let transformedPayload = try self.baseCodec.processOutboundData(requestPart, allocator: context.channel.allocator)
+            let transformedPayload = try self.baseCodec.processOutboundData(
+                requestPart,
+                allocator: context.channel.allocator
+            )
             context.write(self.wrapOutboundOut(transformedPayload), promise: promise)
         } catch {
             promise?.fail(error)
             context.fireErrorCaught(error)
         }
     }
+
+    public func triggerUserOutboundEvent(context: ChannelHandlerContext, event: Any, promise: EventLoopPromise<Void>?) {
+        if let ev = event as? NIOHTTP2FramePayloadToHTTPEvent, let code = ev.reset {
+            context.writeAndFlush(self.wrapOutboundOut(.rstStream(code)), promise: promise)
+            return
+        }
+        context.triggerUserOutboundEvent(event, promise: promise)
+    }
 }
+
+@available(*, unavailable)
+extension HTTP2FramePayloadToHTTPClientCodec: Sendable {}
 
 // MARK: - Server
 
 private struct BaseServerCodec {
     private var headerStateMachine: HTTP2HeadersStateMachine = .init(mode: .server)
 
-    mutating func processInboundData(_ data: HTTP2Frame.FramePayload) throws -> (first: HTTPRequestPart?, second: HTTPRequestPart?) {
+    mutating func processInboundData(
+        _ data: HTTP2Frame.FramePayload
+    ) throws -> (first: HTTPRequestPart?, second: HTTPRequestPart?) {
         switch data {
         case .headers(let headerContent):
             if case .trailer = try self.headerStateMachine.newHeaders(block: headerContent.headers) {
@@ -183,7 +207,10 @@ private struct BaseServerCodec {
         }
     }
 
-    mutating func processOutboundData(_ data: HTTPResponsePart, allocator: ByteBufferAllocator) -> HTTP2Frame.FramePayload {
+    mutating func processOutboundData(
+        _ data: HTTPResponsePart,
+        allocator: ByteBufferAllocator
+    ) -> HTTP2Frame.FramePayload {
         switch data {
         case .head(let head):
             let payload = HTTP2Frame.FramePayload.Headers(headers: HPACKHeaders(head))
@@ -193,10 +220,12 @@ private struct BaseServerCodec {
             return .data(payload)
         case .end(let trailers):
             if let trailers {
-                return .headers(.init(
-                    headers: HPACKHeaders(trailers),
-                    endStream: true
-                ))
+                return .headers(
+                    .init(
+                        headers: HPACKHeaders(trailers),
+                        endStream: true
+                    )
+                )
             } else {
                 return .data(.init(data: .byteBuffer(allocator.buffer(capacity: 0)), endStream: true))
             }
@@ -243,5 +272,38 @@ public final class HTTP2FramePayloadToHTTPServerCodec: ChannelDuplexHandler, Rem
         let responsePart = self.unwrapOutboundIn(data)
         let transformedPayload = self.baseCodec.processOutboundData(responsePart, allocator: context.channel.allocator)
         context.write(self.wrapOutboundOut(transformedPayload), promise: promise)
+    }
+
+    public func triggerUserOutboundEvent(context: ChannelHandlerContext, event: Any, promise: EventLoopPromise<Void>?) {
+        if let ev = event as? NIOHTTP2FramePayloadToHTTPEvent, let code = ev.reset {
+            context.writeAndFlush(self.wrapOutboundOut(.rstStream(code)), promise: promise)
+            return
+        }
+        context.triggerUserOutboundEvent(event, promise: promise)
+    }
+}
+
+@available(*, unavailable)
+extension HTTP2FramePayloadToHTTPServerCodec: Sendable {}
+
+/// Events that can be sent by the application to be handled by the `HTTP2StreamChannel`
+public struct NIOHTTP2FramePayloadToHTTPEvent: Hashable, Sendable {
+    private enum Kind: Hashable, Sendable {
+        case reset(HTTP2ErrorCode)
+    }
+
+    private var kind: Kind
+
+    /// Send a `RST_STREAM` with the specified code
+    public static func reset(code: HTTP2ErrorCode) -> Self {
+        .init(kind: .reset(code))
+    }
+
+    /// Returns reset code if the event is a reset
+    public var reset: HTTP2ErrorCode? {
+        switch self.kind {
+        case .reset(let code):
+            return code
+        }
     }
 }

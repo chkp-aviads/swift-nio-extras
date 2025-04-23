@@ -12,14 +12,16 @@
 //
 //===----------------------------------------------------------------------===//
 
-import XCTest
 import CNIOExtrasZlib
 import NIOCore
 import NIOEmbedded
+import XCTest
+
 @testable import NIOHTTP1
 @testable import NIOHTTPCompression
 
-private let testString = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua."
+private let testString =
+    "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua."
 
 private final class DecompressedAssert: ChannelInboundHandler {
     typealias InboundIn = HTTPServerRequestPart
@@ -42,26 +44,44 @@ private final class DecompressedAssert: ChannelInboundHandler {
 class HTTPRequestDecompressorTest: XCTestCase {
     func testDecompressionNoLimit() throws {
         let channel = EmbeddedChannel()
-        try channel.pipeline.addHandler(NIOHTTPRequestDecompressor(limit: .none)).wait()
-        try channel.pipeline.addHandler(DecompressedAssert()).wait()
+        try channel.pipeline.syncOperations.addHandler(NIOHTTPRequestDecompressor(limit: .none))
+        try channel.pipeline.syncOperations.addHandler(DecompressedAssert())
 
         let buffer = ByteBuffer.of(string: testString)
         let compressed = compress(buffer, "gzip")
 
         let headers = HTTPHeaders([("Content-Encoding", "gzip"), ("Content-Length", "\(compressed.readableBytes)")])
-        try channel.writeInbound(HTTPServerRequestPart.head(.init(version: .init(major: 1, minor: 1), method: .POST, uri: "https://nio.swift.org/test", headers: headers)))
+        try channel.writeInbound(
+            HTTPServerRequestPart.head(
+                .init(
+                    version: .init(major: 1, minor: 1),
+                    method: .POST,
+                    uri: "https://nio.swift.org/test",
+                    headers: headers
+                )
+            )
+        )
 
         XCTAssertNoThrow(try channel.writeInbound(HTTPServerRequestPart.body(compressed)))
     }
 
     func testDecompressionLimitRatio() throws {
         let channel = EmbeddedChannel()
-        try channel.pipeline.addHandler(NIOHTTPRequestDecompressor(limit: .ratio(10))).wait()
+        try channel.pipeline.syncOperations.addHandler(NIOHTTPRequestDecompressor(limit: .ratio(10)))
         let decompressed = ByteBuffer.of(bytes: Array(repeating: 0, count: 500))
         let compressed = compress(decompressed, "gzip")
         let headers = HTTPHeaders([("Content-Encoding", "gzip"), ("Content-Length", "\(compressed.readableBytes)")])
-        try channel.writeInbound(HTTPServerRequestPart.head(.init(version: .init(major: 1, minor: 1), method: .POST, uri: "https://nio.swift.org/test", headers: headers)))
-        
+        try channel.writeInbound(
+            HTTPServerRequestPart.head(
+                .init(
+                    version: .init(major: 1, minor: 1),
+                    method: .POST,
+                    uri: "https://nio.swift.org/test",
+                    headers: headers
+                )
+            )
+        )
+
         do {
             try channel.writeInbound(HTTPServerRequestPart.body(compressed))
             XCTFail("writeShouldFail")
@@ -80,10 +100,21 @@ class HTTPRequestDecompressorTest: XCTestCase {
         let channel = EmbeddedChannel()
         let decompressed = ByteBuffer.of(bytes: Array(repeating: 0, count: 200))
         let compressed = compress(decompressed, "gzip")
-        try channel.pipeline.addHandler(NIOHTTPRequestDecompressor(limit: .size(decompressed.readableBytes-1))).wait()
+        try channel.pipeline.syncOperations.addHandler(
+            NIOHTTPRequestDecompressor(limit: .size(decompressed.readableBytes - 1))
+        )
         let headers = HTTPHeaders([("Content-Encoding", "gzip"), ("Content-Length", "\(compressed.readableBytes)")])
-        try channel.writeInbound(HTTPServerRequestPart.head(.init(version: .init(major: 1, minor: 1), method: .POST, uri: "https://nio.swift.org/test", headers: headers)))
-        
+        try channel.writeInbound(
+            HTTPServerRequestPart.head(
+                .init(
+                    version: .init(major: 1, minor: 1),
+                    method: .POST,
+                    uri: "https://nio.swift.org/test",
+                    headers: headers
+                )
+            )
+        )
+
         do {
             try channel.writeInbound(HTTPServerRequestPart.body(compressed))
             XCTFail("writeInbound should fail")
@@ -100,7 +131,7 @@ class HTTPRequestDecompressorTest: XCTestCase {
 
     func testDecompression() throws {
         let channel = EmbeddedChannel()
-        try channel.pipeline.addHandler(NIOHTTPRequestDecompressor(limit: .none)).wait()
+        try channel.pipeline.syncOperations.addHandler(NIOHTTPRequestDecompressor(limit: .none))
 
         let body = Array(repeating: testString, count: 1000).joined()
         let algorithms: [(actual: String, announced: String)?] = [
@@ -110,7 +141,7 @@ class HTTPRequestDecompressorTest: XCTestCase {
             (actual: "gzip", announced: "deflate"),
             (actual: "deflate", announced: "gzip"),
         ]
-        
+
         for algorithm in algorithms {
             let compressed: ByteBuffer
             var headers = HTTPHeaders()
@@ -123,7 +154,16 @@ class HTTPRequestDecompressorTest: XCTestCase {
             headers.add(name: "Content-Length", value: "\(compressed.readableBytes)")
 
             XCTAssertNoThrow(
-                try channel.writeInbound(HTTPServerRequestPart.head(.init(version: .init(major: 1, minor: 1), method: .POST, uri: "https://nio.swift.org/test", headers: headers)))
+                try channel.writeInbound(
+                    HTTPServerRequestPart.head(
+                        .init(
+                            version: .init(major: 1, minor: 1),
+                            method: .POST,
+                            uri: "https://nio.swift.org/test",
+                            headers: headers
+                        )
+                    )
+                )
             )
 
             XCTAssertNoThrow(try channel.writeInbound(HTTPServerRequestPart.body(compressed)))
@@ -136,9 +176,18 @@ class HTTPRequestDecompressorTest: XCTestCase {
         let compressed = ByteBuffer(bytes: [120, 156, 99, 0, 0, 0, 1, 0, 1] + [1, 2, 3])
 
         let channel = EmbeddedChannel()
-        try channel.pipeline.addHandler(NIOHTTPRequestDecompressor(limit: .none)).wait()
+        try channel.pipeline.syncOperations.addHandler(NIOHTTPRequestDecompressor(limit: .none))
         let headers = HTTPHeaders([("Content-Encoding", "deflate"), ("Content-Length", "\(compressed.readableBytes)")])
-        try channel.writeInbound(HTTPServerRequestPart.head(.init(version: .init(major: 1, minor: 1), method: .POST, uri: "https://nio.swift.org/test", headers: headers)))
+        try channel.writeInbound(
+            HTTPServerRequestPart.head(
+                .init(
+                    version: .init(major: 1, minor: 1),
+                    method: .POST,
+                    uri: "https://nio.swift.org/test",
+                    headers: headers
+                )
+            )
+        )
 
         XCTAssertThrowsError(try channel.writeInbound(HTTPServerRequestPart.body(compressed)))
     }
@@ -148,9 +197,18 @@ class HTTPRequestDecompressorTest: XCTestCase {
         let compressed = ByteBuffer(bytes: [120, 156, 99, 0])
 
         let channel = EmbeddedChannel()
-        try channel.pipeline.addHandler(NIOHTTPRequestDecompressor(limit: .none)).wait()
+        try channel.pipeline.syncOperations.addHandler(NIOHTTPRequestDecompressor(limit: .none))
         let headers = HTTPHeaders([("Content-Encoding", "deflate"), ("Content-Length", "\(compressed.readableBytes)")])
-        try channel.writeInbound(HTTPServerRequestPart.head(.init(version: .init(major: 1, minor: 1), method: .POST, uri: "https://nio.swift.org/test", headers: headers)))
+        try channel.writeInbound(
+            HTTPServerRequestPart.head(
+                .init(
+                    version: .init(major: 1, minor: 1),
+                    method: .POST,
+                    uri: "https://nio.swift.org/test",
+                    headers: headers
+                )
+            )
+        )
 
         XCTAssertNoThrow(try channel.writeInbound(HTTPServerRequestPart.body(compressed)))
         XCTAssertThrowsError(try channel.writeInbound(HTTPServerRequestPart.end(nil)))
@@ -176,7 +234,14 @@ class HTTPRequestDecompressorTest: XCTestCase {
             return buffer
         }
 
-        let rc = CNIOExtrasZlib_deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, windowBits, 8, Z_DEFAULT_STRATEGY)
+        let rc = CNIOExtrasZlib_deflateInit2(
+            &stream,
+            Z_DEFAULT_COMPRESSION,
+            Z_DEFLATED,
+            windowBits,
+            8,
+            Z_DEFAULT_STRATEGY
+        )
         XCTAssertEqual(Z_OK, rc)
 
         defer {
@@ -190,15 +255,19 @@ class HTTPRequestDecompressorTest: XCTestCase {
 
         body.readWithUnsafeMutableReadableBytes { dataPtr in
             let typedPtr = dataPtr.baseAddress!.assumingMemoryBound(to: UInt8.self)
-            let typedDataPtr = UnsafeMutableBufferPointer(start: typedPtr,
-                                                          count: dataPtr.count)
+            let typedDataPtr = UnsafeMutableBufferPointer(
+                start: typedPtr,
+                count: dataPtr.count
+            )
 
             stream.avail_in = UInt32(typedDataPtr.count)
             stream.next_in = typedDataPtr.baseAddress!
 
             buffer.writeWithUnsafeMutableBytes(minimumWritableBytes: 0) { outputPtr in
-                let typedOutputPtr = UnsafeMutableBufferPointer(start: outputPtr.baseAddress!.assumingMemoryBound(to: UInt8.self),
-                                                                count: outputPtr.count)
+                let typedOutputPtr = UnsafeMutableBufferPointer(
+                    start: outputPtr.baseAddress!.assumingMemoryBound(to: UInt8.self),
+                    count: outputPtr.count
+                )
                 stream.avail_out = UInt32(typedOutputPtr.count)
                 stream.next_out = typedOutputPtr.baseAddress!
                 let rc = deflate(&stream, Z_FINISH)

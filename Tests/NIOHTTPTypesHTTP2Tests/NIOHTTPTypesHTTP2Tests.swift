@@ -63,14 +63,20 @@ final class NIOHTTPTypesHTTP2Tests: XCTestCase {
         super.tearDown()
     }
 
-    static let request = HTTPRequest(method: .get, scheme: "https", authority: "www.example.com", path: "/", headerFields: [
-        .accept: "*/*",
-        .acceptEncoding: "gzip",
-        .acceptEncoding: "br",
-        .trailer: "X-Foo",
-        .cookie: "a=b",
-        .cookie: "c=d",
-    ])
+    static let request = HTTPRequest(
+        method: .get,
+        scheme: "https",
+        authority: "www.example.com",
+        path: "/",
+        headerFields: [
+            .accept: "*/*",
+            .acceptEncoding: "gzip",
+            .acceptEncoding: "br",
+            .trailer: "X-Foo",
+            .cookie: "a=b",
+            .cookie: "c=d",
+        ]
+    )
 
     static let oldRequest: HPACKHeaders = [
         ":method": "GET",
@@ -85,10 +91,13 @@ final class NIOHTTPTypesHTTP2Tests: XCTestCase {
         "cookie": "c=d",
     ]
 
-    static let response = HTTPResponse(status: .ok, headerFields: [
-        .server: "HTTPServer/1.0",
-        .trailer: "X-Foo",
-    ])
+    static let response = HTTPResponse(
+        status: .ok,
+        headerFields: [
+            .server: "HTTPServer/1.0",
+            .trailer: "X-Foo",
+        ]
+    )
 
     static let oldResponse: HPACKHeaders = [
         ":status": "200",
@@ -103,13 +112,20 @@ final class NIOHTTPTypesHTTP2Tests: XCTestCase {
     func testClientHTTP2ToHTTP() throws {
         let recorder = InboundRecorder<HTTPResponsePart>()
 
-        try self.channel.pipeline.addHandlers(HTTP2FramePayloadToHTTPClientCodec(), recorder).wait()
+        try self.channel.pipeline.syncOperations.addHandlers(HTTP2FramePayloadToHTTPClientCodec(), recorder)
 
         try self.channel.writeOutbound(HTTPRequestPart.head(Self.request))
         try self.channel.writeOutbound(HTTPRequestPart.end(Self.trailers))
+        try self.channel.triggerUserOutboundEvent(NIOHTTP2FramePayloadToHTTPEvent.reset(code: .enhanceYourCalm)).wait()
 
         XCTAssertEqual(try self.channel.readOutbound(as: HTTP2Frame.FramePayload.self)?.headers, Self.oldRequest)
         XCTAssertEqual(try self.channel.readOutbound(as: HTTP2Frame.FramePayload.self)?.headers, Self.oldTrailers)
+        switch try self.channel.readOutbound(as: HTTP2Frame.FramePayload.self) {
+        case .rstStream(.enhanceYourCalm):
+            break
+        default:
+            XCTFail("expected reset")
+        }
 
         try self.channel.writeInbound(HTTP2Frame.FramePayload(headers: Self.oldResponse))
         try self.channel.writeInbound(HTTP2Frame.FramePayload(headers: Self.oldTrailers))
@@ -123,7 +139,7 @@ final class NIOHTTPTypesHTTP2Tests: XCTestCase {
     func testServerHTTP2ToHTTP() throws {
         let recorder = InboundRecorder<HTTPRequestPart>()
 
-        try self.channel.pipeline.addHandlers(HTTP2FramePayloadToHTTPServerCodec(), recorder).wait()
+        try self.channel.pipeline.syncOperations.addHandlers(HTTP2FramePayloadToHTTPServerCodec(), recorder)
 
         try self.channel.writeInbound(HTTP2Frame.FramePayload(headers: Self.oldRequest))
         try self.channel.writeInbound(HTTP2Frame.FramePayload(headers: Self.oldTrailers))
@@ -133,9 +149,16 @@ final class NIOHTTPTypesHTTP2Tests: XCTestCase {
 
         try self.channel.writeOutbound(HTTPResponsePart.head(Self.response))
         try self.channel.writeOutbound(HTTPResponsePart.end(Self.trailers))
+        try self.channel.triggerUserOutboundEvent(NIOHTTP2FramePayloadToHTTPEvent.reset(code: .enhanceYourCalm)).wait()
 
         XCTAssertEqual(try self.channel.readOutbound(as: HTTP2Frame.FramePayload.self)?.headers, Self.oldResponse)
         XCTAssertEqual(try self.channel.readOutbound(as: HTTP2Frame.FramePayload.self)?.headers, Self.oldTrailers)
+        switch try self.channel.readOutbound(as: HTTP2Frame.FramePayload.self) {
+        case .rstStream(.enhanceYourCalm):
+            break
+        default:
+            XCTFail("expected reset")
+        }
 
         XCTAssertTrue(try self.channel.finish().isClean)
     }
