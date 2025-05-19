@@ -85,4 +85,8 @@ public enum SOCKSError: Sendable {
         }
     }
 
+    /// Authentication to the SOCKS server failed.
+    public struct AuthenticationFailed: Error, Hashable {
+        public init() {}
+    }
 }

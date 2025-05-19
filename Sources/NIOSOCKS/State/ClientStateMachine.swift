@@ -18,6 +18,7 @@ private enum ClientState: Hashable {
     case inactive
     case waitingForClientGreeting
     case waitingForAuthenticationMethod(ClientGreeting)
+    case waitingForAuthResponse
     case waitingForClientRequest
     case waitingForServerResponse(SOCKSRequest)
     case active
@@ -28,6 +29,7 @@ enum ClientAction: Hashable {
     case waitForMoreData
     case sendGreeting
     case sendRequest
+    case sendAuthentication
     case proxyEstablished
 }
 
@@ -39,7 +41,7 @@ struct ClientStateMachine {
         switch self.state {
         case .active:
             return true
-        case .error, .inactive, .waitingForAuthenticationMethod, .waitingForClientGreeting, .waitingForClientRequest,
+        case .error, .inactive, .waitingForAuthenticationMethod, .waitingForAuthResponse, .waitingForClientGreeting, .waitingForClientRequest,
             .waitingForServerResponse:
             return false
         }
@@ -49,7 +51,7 @@ struct ClientStateMachine {
         switch self.state {
         case .inactive:
             return true
-        case .active, .error, .waitingForAuthenticationMethod, .waitingForClientGreeting, .waitingForClientRequest,
+        case .active, .error, .waitingForAuthenticationMethod, .waitingForAuthResponse, .waitingForClientGreeting, .waitingForClientRequest,
             .waitingForServerResponse:
             return false
         }
@@ -69,6 +71,11 @@ extension ClientStateMachine {
             switch self.state {
             case .waitingForAuthenticationMethod(let greeting):
                 guard let action = try self.handleSelectedAuthenticationMethod(&buffer, greeting: greeting) else {
+                    return .waitForMoreData
+                }
+                return action
+            case .waitingForAuthResponse:
+                guard let action = try self.handleUsernamePasswordAuthResponse(&buffer) else {
                     return .waitForMoreData
                 }
                 return action
@@ -117,15 +124,49 @@ extension ClientStateMachine {
     }
 
     mutating func authenticate(_ buffer: inout ByteBuffer, method: AuthenticationMethod) -> ClientAction {
-        precondition(method == .noneRequired, "No authentication mechanism is supported. Use .noneRequired only.")
-
-        // we don't currently support any authentication
-        // so assume all is fine, and instruct the client
-        // to send the request
-        self.state = .waitingForClientRequest
-        return .sendRequest
+        if method == .noneRequired {
+            // No authentication needed, proceed to send request
+            self.state = .waitingForClientRequest
+            return .sendRequest
+        } else if method == .usernamePassword {
+            // We need to perform username/password authentication
+            return .sendAuthentication
+        } else {
+            // We don't support this authentication method
+            preconditionFailure("Authentication method \(method) not supported")
+        }
     }
 
+    mutating func handleUsernamePasswordAuthResponse(_ buffer: inout ByteBuffer) throws -> ClientAction? {
+        // Per RFC 1929, the response is a version byte (always 0x01) followed by a status byte (0x00 = success)
+        try buffer.parseUnwindingIfNeeded { buffer -> ClientAction? in
+            guard let version = buffer.readInteger(as: UInt8.self),
+                  let status = buffer.readInteger(as: UInt8.self) else {
+                return nil
+            }
+            
+            guard version == 0x01 else {
+                throw SOCKSError.InvalidProtocolVersion(actual: version)
+            }
+            
+            guard status == 0x00 else {
+                throw SOCKSError.AuthenticationFailed()
+            }
+            
+            // Authentication was successful, continue with the SOCKS request
+            self.state = .waitingForClientRequest
+            return .sendRequest
+        }
+    }
+    
+    mutating func sendUsernamePasswordAuth(_ username: String, _ password: String) throws {
+        guard case .waitingForAuthenticationMethod = self.state else {
+            throw SOCKSError.InvalidClientState()
+        }
+        
+        // After sending authentication data, we expect an auth response
+        self.state = .waitingForAuthResponse
+    }
 }
 
 // MARK: - Outgoing

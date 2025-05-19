@@ -29,17 +29,21 @@ public final class SOCKSClientHandler: ChannelDuplexHandler {
     public typealias OutboundOut = ByteBuffer
 
     private let targetAddress: SOCKSAddress
+    private let username: String?
+    private let password: String?
 
     private var state: ClientStateMachine
     private var removalToken: ChannelHandlerContext.RemovalToken?
     private var inboundBuffer: ByteBuffer?
 
     private var bufferedWrites: MarkedCircularBuffer<(NIOAny, EventLoopPromise<Void>?)> = .init(initialCapacity: 8)
-
+    
     /// Creates a new ``SOCKSClientHandler`` that connects to a server
-    /// and instructs the server to connect to `targetAddress`.
+    /// and instructs the server to connect to `targetAddress` with basic authentication.
     /// - parameter targetAddress: The desired end point - note that only IPv4, IPv6, and FQDNs are supported.
-    public init(targetAddress: SOCKSAddress) {
+    /// - parameter username: The username to use for authentication.
+    /// - parameter password: The password to use for authentication.
+    public init(targetAddress: SOCKSAddress, username: String? = nil, password: String? = nil) {
 
         switch targetAddress {
         case .address(.unixDomainSocket):
@@ -50,6 +54,8 @@ public final class SOCKSClientHandler: ChannelDuplexHandler {
 
         self.state = ClientStateMachine()
         self.targetAddress = targetAddress
+        self.username = username
+        self.password = password
     }
 
     public func channelActive(context: ChannelHandlerContext) {
@@ -137,6 +143,8 @@ extension SOCKSClientHandler {
             break  // do nothing, we've already buffered the data
         case .sendGreeting:
             try self.handleActionSendClientGreeting(context: context)
+        case .sendAuthentication:
+            try self.handleActionSendAuthentication(context: context)
         case .sendRequest:
             try self.handleActionSendRequest(context: context)
         case .proxyEstablished:
@@ -145,8 +153,18 @@ extension SOCKSClientHandler {
     }
 
     private func handleActionSendClientGreeting(context: ChannelHandlerContext) throws {
-        let greeting = ClientGreeting(methods: [.noneRequired])  // no authentication currently supported
-        let capacity = 3  // [version, #methods, methods...]
+        let methods: [AuthenticationMethod]
+        
+        if self.username != nil && self.password != nil {
+            // Support both username/password and no authentication
+            methods = [.usernamePassword, .noneRequired]
+        } else {
+            // No authentication only
+            methods = [.noneRequired]
+        }
+        
+        let greeting = ClientGreeting(methods: methods)
+        let capacity = 2 + methods.count  // [version, #methods, methods...]
         var buffer = context.channel.allocator.buffer(capacity: capacity)
         buffer.writeClientGreeting(greeting)
         try self.state.sendClientGreeting(greeting)
@@ -172,6 +190,43 @@ extension SOCKSClientHandler {
         let capacity = 6 + self.targetAddress.size
         var buffer = context.channel.allocator.buffer(capacity: capacity)
         buffer.writeClientRequest(request)
+        context.writeAndFlush(self.wrapOutboundOut(buffer), promise: nil)
+    }
+
+    private func handleActionSendAuthentication(context: ChannelHandlerContext) throws {
+        guard let username = self.username, let password = self.password else {
+            throw SOCKSError.AuthenticationFailed()
+        }
+        
+        // Format per RFC 1929:
+        // +----+------+----------+------+----------+
+        // |VER | ULEN |  UNAME   | PLEN |  PASSWD  |
+        // +----+------+----------+------+----------+
+        // | 1  |  1   | 1 to 255 |  1   | 1 to 255 |
+        // +----+------+----------+------+----------+
+        
+        let usernameBytes = username.utf8
+        let passwordBytes = password.utf8
+        
+        guard usernameBytes.count <= 255, passwordBytes.count <= 255 else {
+            throw SOCKSError.AuthenticationFailed()
+        }
+        
+        let capacity = 3 + usernameBytes.count + passwordBytes.count
+        var buffer = context.channel.allocator.buffer(capacity: capacity)
+        
+        // VER = 0x01 for username/password auth
+        buffer.writeInteger(UInt8(0x01))
+        // ULEN - username length
+        buffer.writeInteger(UInt8(usernameBytes.count))
+        // UNAME - username
+        buffer.writeBytes(usernameBytes)
+        // PLEN - password length
+        buffer.writeInteger(UInt8(passwordBytes.count))
+        // PASSWD - password
+        buffer.writeBytes(passwordBytes)
+        
+        try self.state.sendUsernamePasswordAuth(username, password)
         context.writeAndFlush(self.wrapOutboundOut(buffer), promise: nil)
     }
 

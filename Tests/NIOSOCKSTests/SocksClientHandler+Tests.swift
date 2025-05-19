@@ -330,6 +330,96 @@ class SocksClientHandlerTests: XCTestCase {
             XCTAssertEqual($0 as? ChannelPipelineError, .notFound)
         }
     }
+    
+    func testUsernamePasswordAuthentication() throws {
+        let authHandler = SOCKSClientHandler(targetAddress: .address(try! .init(ipAddress: "192.168.1.1", port: 80)),
+                                           username: "testuser", 
+                                           password: "testpass")
+        let authChannel = EmbeddedChannel(handler: authHandler)
+
+        // Activate the channel to start the handshake
+        try authChannel.connect(to: .init(ipAddress: "127.0.0.1", port: 1080)).wait()
+
+        // The handler should send a greeting including usernamePassword method
+        if let greeting = try authChannel.readOutbound(as: ByteBuffer.self) {
+            XCTAssertEqual(greeting.readableBytes, 4) // 1 version + 1 method count + 2 methods
+            XCTAssertEqual(greeting.getInteger(at: 0, as: UInt8.self), 5) // version
+            XCTAssertEqual(greeting.getInteger(at: 1, as: UInt8.self), 2) // two methods
+            XCTAssertEqual(greeting.getInteger(at: 2, as: UInt8.self), 2) // usernamePassword method
+            XCTAssertEqual(greeting.getInteger(at: 3, as: UInt8.self), 0) // noneRequired method
+        } else {
+            XCTFail("No greeting sent")
+        }
+
+        // Server selects username/password auth
+        var serverSelection = ByteBuffer()
+        serverSelection.writeInteger(UInt8(5)) // version
+        serverSelection.writeInteger(UInt8(2)) // username/password method
+        try authChannel.writeInbound(serverSelection)
+
+        // Client should send auth data
+        if let authData = try authChannel.readOutbound(as: ByteBuffer.self) {
+            XCTAssertEqual(authData.readableBytes, 1 + 1 + 8 + 1 + 8) // ver + ulen + username + plen + password
+            XCTAssertEqual(authData.getInteger(at: 0, as: UInt8.self), 1) // auth version
+            XCTAssertEqual(authData.getInteger(at: 1, as: UInt8.self), 8) // username length
+            
+            let username = authData.getString(at: 2, length: 8)
+            XCTAssertEqual(username, "testuser")
+            
+            XCTAssertEqual(authData.getInteger(at: 10, as: UInt8.self), 8) // password length
+            
+            let password = authData.getString(at: 11, length: 8)
+            XCTAssertEqual(password, "testpass")
+        } else {
+            XCTFail("No auth data sent")
+        }
+
+        // Server accepts authentication
+        var serverAuthResponse = ByteBuffer()
+        serverAuthResponse.writeInteger(UInt8(1)) // auth version
+        serverAuthResponse.writeInteger(UInt8(0)) // status OK
+        try authChannel.writeInbound(serverAuthResponse)
+
+        // Client should send SOCKS request
+        if let request = try authChannel.readOutbound(as: ByteBuffer.self) {
+            XCTAssertEqual(request.readableBytes, 10) // ver + cmd + rsv + atyp + addr + port
+            XCTAssertEqual(request.getInteger(at: 0, as: UInt8.self), 5) // version
+            XCTAssertEqual(request.getInteger(at: 1, as: UInt8.self), 1) // connect command
+            XCTAssertEqual(request.getInteger(at: 2, as: UInt8.self), 0) // reserved
+            XCTAssertEqual(request.getInteger(at: 3, as: UInt8.self), 1) // IPv4 address type
+        } else {
+            XCTFail("No request sent")
+        }
+
+        // Server sends successful response
+        var serverResponse = ByteBuffer()
+        serverResponse.writeInteger(UInt8(5)) // version
+        serverResponse.writeInteger(UInt8(0)) // success
+        serverResponse.writeInteger(UInt8(0)) // reserved
+        serverResponse.writeInteger(UInt8(1)) // IPv4 address type
+        
+        // IP address 192.168.1.1
+        serverResponse.writeInteger(UInt8(192))
+        serverResponse.writeInteger(UInt8(168))
+        serverResponse.writeInteger(UInt8(1))
+        serverResponse.writeInteger(UInt8(1))
+        
+        // Port 80
+        serverResponse.writeInteger(UInt16(80).bigEndian)
+        
+        try authChannel.writeInbound(serverResponse)
+
+        // Trigger an event
+        var testBuffer = ByteBuffer()
+        testBuffer.writeString("Hello")
+        try authChannel.writeOutbound(testBuffer)
+        
+        if let writtenData = try authChannel.readOutbound(as: ByteBuffer.self) {
+            XCTAssertEqual(writtenData.getString(at: 0, length: 5), "Hello")
+        } else {
+            XCTFail("No data sent")
+        }
+    }
 }
 
 class MockSOCKSClientHandler: ChannelInboundHandler {
