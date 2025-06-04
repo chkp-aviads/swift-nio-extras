@@ -21,7 +21,7 @@ private enum ClientState: Hashable {
     case waitingForAuthResponse
     case waitingForClientRequest
     case waitingForServerResponse(SOCKSRequest)
-    case active
+    case active(SOCKSResponse)
     case error
 }
 
@@ -44,6 +44,17 @@ struct ClientStateMachine {
         case .error, .inactive, .waitingForAuthenticationMethod, .waitingForAuthResponse, .waitingForClientGreeting, .waitingForClientRequest,
             .waitingForServerResponse:
             return false
+        }
+    }
+    
+    /// Get the server response if the proxy is established
+    var activeResponse: SOCKSResponse? {
+        switch self.state {
+        case .active(let response):
+            return response
+        case .error, .inactive, .waitingForAuthenticationMethod, .waitingForAuthResponse, .waitingForClientGreeting, .waitingForClientRequest,
+            .waitingForServerResponse:
+            return nil
         }
     }
 
@@ -118,7 +129,7 @@ extension ClientStateMachine {
             guard response.reply == .succeeded else {
                 throw SOCKSError.ConnectionFailed(reply: response.reply)
             }
-            self.state = .active
+            self.state = .active(response)
             return .proxyEstablished
         }
     }

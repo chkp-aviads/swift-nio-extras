@@ -31,6 +31,7 @@ public final class SOCKSServerHandshakeHandler: ChannelDuplexHandler, RemovableC
 
     var inboundBuffer: ByteBuffer?
     var stateMachine: ServerStateMachine
+    var currentRequest: SOCKSRequest?
 
     public init() {
         self.stateMachine = ServerStateMachine()
@@ -50,6 +51,12 @@ public final class SOCKSServerHandshakeHandler: ChannelDuplexHandler, RemovableC
             guard let message = try self.stateMachine.receiveBuffer(&self.inboundBuffer!) else {
                 return  // do nothing, we've buffered the data
             }
+            
+            // Store the request if we received one
+            if case .request(let request) = message {
+                self.currentRequest = request
+            }
+            
             context.fireChannelRead(self.wrapInboundOut(message))
         } catch {
             context.fireErrorCaught(error)
@@ -111,7 +118,13 @@ public final class SOCKSServerHandshakeHandler: ChannelDuplexHandler, RemovableC
     ) throws -> ByteBuffer {
         try stateMachine.sendServerResponse(response)
         if case .succeeded = response.reply {
-            context.fireUserInboundEventTriggered(SOCKSProxyEstablishedEvent())
+            // Use the command from the stored request
+            // Default to .connect if we don't have a request (shouldn't happen in normal operation)
+            let command = self.currentRequest?.command ?? .connect
+            context.fireUserInboundEventTriggered(SOCKSProxyEstablishedEvent(
+                boundAddress: response.boundAddress,
+                command: command
+            ))
         }
         var buffer = context.channel.allocator.buffer(capacity: 16)
         buffer.writeServerResponse(response)

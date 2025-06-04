@@ -61,3 +61,4 @@ On the [`nio-extras-0.1`](https://github.com/apple/swift-nio-extras/tree/nio-ext
 - [`HTTPResumableUploadHandler`](Sources/NIOResumableUpload/HTTPResumableUploadHandler.swift) A `ChannelHandler` that translates HTTP resumable uploads to regular uploads.
 - [`HTTPDrippingDownloadHandler`](Sources/NIOHTTPResponsiveness/HTTPDrippingDownloadHandler.swift) A `ChannelHandler` that sends a configurable stream of zeroes to a client.
 - [`HTTPReceiveDiscardHandler`](Sources/NIOHTTPResponsiveness/HTTPReceiveDiscardHandler.swift) A `ChannelHandler` that receives arbitrary bytes from a client and discards them.
+- [`SOCKSClientHandler`](Sources/NIOSOCKS/Channel%20Handlers/SOCKSClientHandler.swift) A `ChannelHandler` that implements SOCKS5 client protocol to connect through a proxy server, supporting both TCP CONNECT and UDP ASSOCIATE modes. [Usage Guide](docs/SOCKS5Usage.md)

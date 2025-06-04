@@ -18,6 +18,10 @@ import NIOCore
 /// to a host. This handler should be inserted at the beginning of a
 /// channel's pipeline. Note that SOCKS only supports fully-qualified
 /// domain names and IPv4 or IPv6 sockets, and not UNIX sockets.
+///
+/// Two connection modes are supported:
+/// - CONNECT: For TCP connections (default). The handler should be added to a TCP channel.
+/// - UDP ASSOCIATE: For UDP connections. The handler should be added to a UDP channel.
 public final class SOCKSClientHandler: ChannelDuplexHandler {
     /// Accepts `ByteBuffer` as input where receiving.
     public typealias InboundIn = ByteBuffer
@@ -31,6 +35,7 @@ public final class SOCKSClientHandler: ChannelDuplexHandler {
     private let targetAddress: SOCKSAddress
     private let username: String?
     private let password: String?
+    private let commandType: SOCKSCommand
 
     private var state: ClientStateMachine
     private var removalToken: ChannelHandlerContext.RemovalToken?
@@ -43,7 +48,8 @@ public final class SOCKSClientHandler: ChannelDuplexHandler {
     /// - parameter targetAddress: The desired end point - note that only IPv4, IPv6, and FQDNs are supported.
     /// - parameter username: The username to use for authentication.
     /// - parameter password: The password to use for authentication.
-    public init(targetAddress: SOCKSAddress, username: String? = nil, password: String? = nil) {
+    /// - parameter command: The SOCKS command to use, either .connect (default) for TCP connections or .udpAssociate for UDP.
+    public init(targetAddress: SOCKSAddress, username: String? = nil, password: String? = nil, command: SOCKSCommand = .connect) {
 
         switch targetAddress {
         case .address(.unixDomainSocket):
@@ -56,6 +62,7 @@ public final class SOCKSClientHandler: ChannelDuplexHandler {
         self.targetAddress = targetAddress
         self.username = username
         self.password = password
+        self.commandType = command
     }
 
     public func channelActive(context: ChannelHandlerContext) {
@@ -172,7 +179,15 @@ extension SOCKSClientHandler {
     }
 
     private func handleProxyEstablished(context: ChannelHandlerContext) {
-        context.fireUserInboundEventTriggered(SOCKSProxyEstablishedEvent())
+        // Get the server response from the state machine
+        guard let response = self.state.activeResponse else {
+            // This should never happen as we're only in this method when the state is active
+            preconditionFailure("SOCKS proxy established but no server response available")
+        }
+        
+        // Create the event with the bound address and command type from the server response
+        let event = SOCKSProxyEstablishedEvent(boundAddress: response.boundAddress, command: self.commandType)
+        context.fireUserInboundEventTriggered(event)
 
         self.emptyInboundAndOutboundBuffer(context: context)
 
@@ -182,7 +197,7 @@ extension SOCKSClientHandler {
     }
 
     private func handleActionSendRequest(context: ChannelHandlerContext) throws {
-        let request = SOCKSRequest(command: .connect, addressType: self.targetAddress)
+        let request = SOCKSRequest(command: self.commandType, addressType: self.targetAddress)
         try self.state.sendClientRequest(request)
 
         // the client request is always 6 bytes + the address info
@@ -264,8 +279,69 @@ extension SOCKSClientHandler: RemovableChannelHandler {
 
 /// A `Channel` user event that is sent when a SOCKS connection has been established
 ///
-/// After this event has been received it is save to remove the `SOCKSClientHandler` from the channel pipeline.
+/// After this event has been received it is safe to remove the `SOCKSClientHandler` from the channel pipeline.
+/// For UDP ASSOCIATE mode, the `boundAddress` field contains the address the client should use for sending
+/// UDP datagrams through the proxy.
 public struct SOCKSProxyEstablishedEvent: Sendable {
-    public init() {
+    /// The address that the SOCKS server is bound to and listening on
+    /// This is particularly important for UDP ASSOCIATE mode where clients must
+    /// send datagrams to this address.
+    public let boundAddress: SOCKSAddress
+    
+    /// The command type that was used for this connection
+    public let command: SOCKSCommand
+    
+    /// Creates a new SOCKS proxy established event
+    public init(boundAddress: SOCKSAddress, command: SOCKSCommand) {
+        self.boundAddress = boundAddress
+        self.command = command
     }
 }
+
+extension SOCKSClientHandler {
+    /// Creates a new ``SOCKSClientHandler`` that connects to a server
+    /// and instructs the server to establish a TCP connection to `targetAddress`.
+    /// - parameter targetAddress: The desired end point - note that only IPv4, IPv6, and FQDNs are supported.
+    /// - parameter username: The username to use for authentication, if needed.
+    /// - parameter password: The password to use for authentication, if needed.
+    public static func tcpConnection(to targetAddress: SOCKSAddress, username: String? = nil, password: String? = nil) -> SOCKSClientHandler {
+        return SOCKSClientHandler(targetAddress: targetAddress, username: username, password: password, command: .connect)
+    }
+    
+    /// Creates a new ``SOCKSClientHandler`` that connects to a server
+    /// and instructs the server to establish a UDP association for relaying datagrams.
+    /// - parameter targetAddress: The desired end point - note that only IPv4, IPv6, and FQDNs are supported.
+    /// - parameter username: The username to use for authentication, if needed.
+    /// - parameter password: The password to use for authentication, if needed.
+    public static func udpAssociation(to targetAddress: SOCKSAddress, username: String? = nil, password: String? = nil) -> SOCKSClientHandler {
+        return SOCKSClientHandler(targetAddress: targetAddress, username: username, password: password, command: .udpAssociate)
+    }
+}
+
+// MARK: UDP Association Handling Guide
+/*
+UDP association with SOCKS5 proxies is slightly more complex than TCP connections:
+
+1. When using UDP ASSOCIATE, the client sends a UDP ASSOCIATE request to the SOCKS server
+   over a TCP control connection.
+
+2. The SOCKS server responds with:
+   - A reply code (0x00 for success)
+   - A bound address (IP and port) that the client should use to send UDP datagrams
+
+3. This handler captures the bound address from the SOCKS server response and makes it available
+   through the SOCKSProxyEstablishedEvent.
+
+4. When sending UDP datagrams through the proxy, they must be wrapped in a special format:
+   +----+------+------+----------+----------+----------+
+   |RSV | FRAG | ATYP | DST.ADDR | DST.PORT |   DATA   |
+   +----+------+------+----------+----------+----------+
+   | 2  |  1   |  1   | Variable |    2     | Variable |
+   +----+------+------+----------+----------+----------+
+
+5. The client must maintain the TCP control connection to the SOCKS server for as long as
+   the UDP association is needed. If the TCP connection is closed, the UDP association is
+   terminated by the SOCKS server.
+
+For more details, see RFC 1928 section 7 "Procedure for UDP-based clients".
+*/
