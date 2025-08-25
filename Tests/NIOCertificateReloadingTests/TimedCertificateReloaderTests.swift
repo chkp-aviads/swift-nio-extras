@@ -26,6 +26,7 @@ import FoundationEssentials
 import Foundation
 #endif
 
+@available(iOS 16, *)
 final class TimedCertificateReloaderTests: XCTestCase {
     func testCertificatePathDoesNotExist() async throws {
         let failureBox = NIOLockedValueBox([TimedCertificateReloader.CertificateChainAndKeyPairReloadFailure]())
