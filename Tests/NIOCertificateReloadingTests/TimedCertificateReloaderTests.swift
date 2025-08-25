@@ -28,35 +28,57 @@ import Foundation
 
 final class TimedCertificateReloaderTests: XCTestCase {
     func testCertificatePathDoesNotExist() async throws {
+        let failureBox = NIOLockedValueBox([TimedCertificateReloader.CertificateChainAndKeyPairReloadFailure]())
         try await runTimedCertificateReloaderTest(
             certificate: .init(location: .file(path: "doesnotexist"), format: .der),
             privateKey: .init(
                 location: .memory(provider: { Array(Self.samplePrivateKey1.derRepresentation) }),
                 format: .der
             ),
-            validateSources: false
-        ) { reloader in
-            let override = reloader.sslContextConfigurationOverride
-            XCTAssertNil(override.certificateChain)
-            XCTAssertNil(override.privateKey)
-        }
+            validateSources: false,
+            onLoadFailed: { failure in
+                failureBox.withLockedValue { $0.append(failure) }
+            },
+            { reloader in
+                let override = reloader.sslContextConfigurationOverride
+                XCTAssertNil(override.certificateChain)
+                XCTAssertNil(override.privateKey)
+                XCTAssertEqual(failureBox.withLockedValue { $0 }.count, 0)
+                let result = Result { try reloader.reload() }
+                XCTAssertEqual(failureBox.withLockedValue { $0 }.count, 1)
+                XCTAssertThrowsError(try result.get())
+            }
+        )
     }
 
     func testCertificatePathDoesNotExist_ValidatingSource() async throws {
+        let failureBox = NIOLockedValueBox([TimedCertificateReloader.CertificateChainAndKeyPairReloadFailure]())
         do {
             try await runTimedCertificateReloaderTest(
                 certificate: .init(location: .file(path: "doesnotexist"), format: .der),
                 privateKey: .init(
                     location: .memory(provider: { Array(Self.samplePrivateKey1.derRepresentation) }),
                     format: .der
-                )
-            ) { _ in
-                XCTFail("Test should have failed before reaching this point.")
-            }
+                ),
+                onLoadFailed: { failure in
+                    failureBox.withLockedValue { $0.append(failure) }
+                },
+                { _ in
+                    XCTFail("Test should have failed before reaching this point.")
+                }
+            )
         } catch {
+            guard let errorFromCallback = failureBox.withLockedValue({ $0 }).first else {
+                XCTFail("No error from callback")
+                return
+            }
             XCTAssertEqual(
                 error as? TimedCertificateReloader.Error,
                 TimedCertificateReloader.Error.certificatePathNotFound("doesnotexist")
+            )
+            XCTAssertEqual(
+                error as? TimedCertificateReloader.Error,
+                errorFromCallback.error as? TimedCertificateReloader.Error
             )
         }
     }
@@ -269,6 +291,7 @@ final class TimedCertificateReloaderTests: XCTestCase {
 
     func testReloadSuccessfully_FromMemory() async throws {
         let certificateBox: NIOLockedValueBox<[UInt8]> = NIOLockedValueBox([])
+        let updatesBox = NIOLockedValueBox([TimedCertificateReloader.CertificateChainAndKeyPairReloadDiff]())
         try await runTimedCertificateReloaderTest(
             certificate: .init(
                 location: .memory(provider: {
@@ -285,31 +308,57 @@ final class TimedCertificateReloaderTests: XCTestCase {
                 format: .der
             ),
             // We need to disable validation because the provider will initially be empty.
-            validateSources: false
-        ) { reloader in
-            // On first attempt, we should have no certificate or private key overrides available,
-            // since the certificate box is empty.
-            var override = reloader.sslContextConfigurationOverride
-            XCTAssertNil(override.certificateChain)
-            XCTAssertNil(override.privateKey)
+            validateSources: false,
+            onLoaded: { info in
+                updatesBox.withLockedValue { $0.append(info) }
+            },
+            { reloader in
+                // On first attempt, we should have no certificate or private key overrides available,
+                // since the certificate box is empty.
+                var override = reloader.sslContextConfigurationOverride
+                XCTAssertNil(override.certificateChain)
+                XCTAssertNil(override.privateKey)
+                XCTAssertEqual(updatesBox.withLockedValue { $0.count }, 0)
 
-            // Update the box to contain a valid certificate.
-            certificateBox.withLockedValue({ $0 = try! Self.sampleCert.serializeAsPEM().derBytes })
+                // Update the box to contain a valid certificate.
+                certificateBox.withLockedValue({ $0 = try! Self.sampleCert.serializeAsPEM().derBytes })
 
-            // Give the reload loop some time to run and update the cert-key pair.
-            try await Task.sleep(for: .milliseconds(100), tolerance: .zero)
+                // Give the reload loop some time to run and update the cert-key pair.
+                try await Task.sleep(for: .milliseconds(200), tolerance: .zero)
+                // We reload every 50ms and slept 200. There should be 1 reload which has nil previous certs and at least 1 which does not.
+                let updates = updatesBox.withLockedValue { $0 }
+                XCTAssertGreaterThanOrEqual(updates.count, 2)
+                XCTAssertNil(updates.first?.previousCertificateChain)
+                XCTAssertNil(updates.first?.previousPrivateKey)
+                for update in updates.dropFirst() {
+                    XCTAssertEqual(update.previousCertificateChain, update.currentCertificateChain)
+                    XCTAssertEqual(update.previousX509CertificateChain, update.currentX509CertificateChain)
+                    XCTAssertEqual(update.previousPrivateKey, update.currentPrivateKey)
+                    XCTAssertEqual(update.previousX509PrivateKey, update.currentX509PrivateKey)
+                }
+                for updateInfo in updates {
+                    XCTAssertEqual(updateInfo.currentCertificateChain.count, 1)
+                    XCTAssertEqual(
+                        updateInfo.currentCertificateChain,
+                        reloader.sslContextConfigurationOverride.certificateChain
+                    )
+                    XCTAssertEqual(updateInfo.currentX509CertificateChain.first, Self.sampleCert)
+                    XCTAssertEqual(updateInfo.currentPrivateKey, reloader.sslContextConfigurationOverride.privateKey)
+                    XCTAssertEqual(updateInfo.currentX509PrivateKey, .init(Self.samplePrivateKey1))
+                }
 
-            // Now the overrides should be present.
-            override = reloader.sslContextConfigurationOverride
-            XCTAssertEqual(
-                override.certificateChain,
-                [.certificate(try .init(bytes: Self.sampleCert.serializeAsPEM().derBytes, format: .der))]
-            )
-            XCTAssertEqual(
-                override.privateKey,
-                .privateKey(try .init(bytes: Array(Self.samplePrivateKey1.derRepresentation), format: .der))
-            )
-        }
+                // Now the overrides should be present.
+                override = reloader.sslContextConfigurationOverride
+                XCTAssertEqual(
+                    override.certificateChain,
+                    [.certificate(try .init(bytes: Self.sampleCert.serializeAsPEM().derBytes, format: .der))]
+                )
+                XCTAssertEqual(
+                    override.privateKey,
+                    .privateKey(try .init(bytes: Array(Self.samplePrivateKey1.derRepresentation), format: .der))
+                )
+            }
+        )
     }
 
     func testReloadSuccessfully_FromFile() async throws {
@@ -616,6 +665,71 @@ final class TimedCertificateReloaderTests: XCTestCase {
         )
     }
 
+    /// This tests the first makeReloaderValidatingSources helper function, which takes many parameters.
+    func testCreateValidating() throws {
+        let reloader = try TimedCertificateReloader.makeReloaderValidatingSources(
+            refreshInterval: .milliseconds(50),
+            certificateSource: .init(
+                location: .memory(provider: { try Self.sampleCert.serializeAsPEM().derBytes }),
+                format: .der
+            ),
+            privateKeySource: .init(
+                location: .memory(provider: { Array(Self.samplePrivateKey1.derRepresentation) }),
+                format: .der
+            )
+        )
+        // Cert should have been loaded once already
+        XCTAssertEqual(
+            reloader.sslContextConfigurationOverride.certificateChain,
+            [.certificate(try .init(bytes: Self.sampleCert.serializeAsPEM().derBytes, format: .der))]
+        )
+        XCTAssertEqual(
+            reloader.sslContextConfigurationOverride.privateKey,
+            .privateKey(try .init(bytes: Array(Self.samplePrivateKey1.derRepresentation), format: .der))
+        )
+    }
+
+    /// This tests the other makeReloaderValidatingSources helper function, which takes a configuration.
+    func testCreateValidatingConfig() throws {
+        let config = TimedCertificateReloader.Configuration(
+            refreshInterval: .milliseconds(50),
+            certificateSource: .init(
+                location: .memory(provider: { try Self.sampleCert.serializeAsPEM().derBytes }),
+                format: .der
+            ),
+            privateKeySource: .init(
+                location: .memory(provider: { Array(Self.samplePrivateKey1.derRepresentation) }),
+                format: .der
+            )
+        )
+        let reloader = try TimedCertificateReloader.makeReloaderValidatingSources(configuration: config)
+        // Cert should have been loaded once already
+        XCTAssertEqual(
+            reloader.sslContextConfigurationOverride.certificateChain,
+            [.certificate(try .init(bytes: Self.sampleCert.serializeAsPEM().derBytes, format: .der))]
+        )
+        XCTAssertEqual(
+            reloader.sslContextConfigurationOverride.privateKey,
+            .privateKey(try .init(bytes: Array(Self.samplePrivateKey1.derRepresentation), format: .der))
+        )
+    }
+
+    /// This tests makeReloaderValidatingSources when the sources are not valid.
+    func testCreateValidatingConfigInvalid() throws {
+        let config = TimedCertificateReloader.Configuration(
+            refreshInterval: .milliseconds(50),
+            certificateSource: .init(
+                location: .memory(provider: { Array() }),
+                format: .der
+            ),
+            privateKeySource: .init(
+                location: .memory(provider: { Array() }),
+                format: .der
+            )
+        )
+        XCTAssertThrowsError(try TimedCertificateReloader.makeReloaderValidatingSources(configuration: config))
+    }
+
     static let startDate = Date()
     static let samplePrivateKey1 = P384.Signing.PrivateKey()
     static let samplePrivateKey2 = P384.Signing.PrivateKey()
@@ -706,16 +820,22 @@ final class TimedCertificateReloaderTests: XCTestCase {
         certificate: TimedCertificateReloader.CertificateSource,
         privateKey: TimedCertificateReloader.PrivateKeySource,
         validateSources: Bool = true,
+        onLoaded: (@Sendable (TimedCertificateReloader.CertificateChainAndKeyPairReloadDiff) -> Void)? = nil,
+        onLoadFailed: (@Sendable (TimedCertificateReloader.CertificateChainAndKeyPairReloadFailure) -> Void)? = nil,
         _ body: @escaping @Sendable (TimedCertificateReloader) async throws -> Void
     ) async throws {
-        let reloader = TimedCertificateReloader(
+        let config = TimedCertificateReloader.Configuration(
             refreshInterval: .milliseconds(50),
             certificateSource: .init(
                 location: certificate.location,
                 format: certificate.format
             ),
             privateKeySource: .init(location: privateKey.location, format: privateKey.format)
-        )
+        ) {
+            $0.onCertificateLoaded = onLoaded
+            $0.onCertificateLoadFailed = onLoadFailed
+        }
+        let reloader = TimedCertificateReloader(configuration: config)
 
         if validateSources {
             try reloader.reload()
