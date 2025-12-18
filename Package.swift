@@ -300,8 +300,8 @@ let package = Package(
         .library(name: "NIOCertificateReloading", targets: ["NIOCertificateReloading"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-nio.git", from: "2.81.0"),
-        .package(url: "https://github.com/apple/swift-nio-http2.git", from: "1.27.0"),
+        .package(url: "https://github.com/chkp-aviads/swift-nio.git", from: "2.92.2"),
+        .package(url: "https://github.com/chkp-aviads/swift-nio-http2.git", from: "1.39.1"),
         .package(url: "https://github.com/apple/swift-http-types.git", from: "1.3.0"),
         .package(url: "https://github.com/apple/swift-http-structured-headers.git", from: "1.2.0"),
         .package(url: "https://github.com/apple/swift-atomics.git", from: "1.2.0"),
