@@ -110,8 +110,8 @@ var targets: [PackageDescription.Target] = [
     .target(
         name: "CNIOExtrasZlib",
         dependencies: [],
-        linkerSettings: [
-            .linkedLibrary("z")
+        cSettings: [
+            .define("HAVE_HIDDEN")
         ]
     ),
     .testTarget(
@@ -284,6 +284,28 @@ var targets: [PackageDescription.Target] = [
         ],
         swiftSettings: strictConcurrencySettings
     ),
+    .target(
+        name: "NIOCertificateHelpers",
+        dependencies: [
+            .product(name: "NIOSSL", package: "swift-nio-ssl"),
+            .product(name: "SwiftASN1", package: "swift-asn1"),
+            .product(name: "X509", package: "swift-certificates"),
+        ],
+        swiftSettings: strictConcurrencySettings
+    ),
+    .testTarget(
+        name: "NIOCertificateHelpersTests",
+        dependencies: [
+            "NIOCertificateHelpers",
+            .product(name: "NIOCore", package: "swift-nio"),
+            .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
+            .product(name: "NIOSSL", package: "swift-nio-ssl"),
+            .product(name: "X509", package: "swift-certificates"),
+            .product(name: "SwiftASN1", package: "swift-asn1"),
+            .product(name: "Crypto", package: "swift-crypto"),
+        ],
+        swiftSettings: strictConcurrencySettings
+    ),
 ]
 
 let package = Package(
@@ -298,20 +320,22 @@ let package = Package(
         .library(name: "NIOResumableUpload", targets: ["NIOResumableUpload"]),
         .library(name: "NIOHTTPResponsiveness", targets: ["NIOHTTPResponsiveness"]),
         .library(name: "NIOCertificateReloading", targets: ["NIOCertificateReloading"]),
+        .library(name: "NIOCertificateHelpers", targets: ["NIOCertificateHelpers"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/chkp-aviads/swift-nio.git", from: "2.92.2"),
-        .package(url: "https://github.com/chkp-aviads/swift-nio-http2.git", from: "1.39.1"),
+        .package(url: "https://github.com/chkp-aviads/swift-nio.git", from: "2.96.1"),
+        .package(url: "https://github.com/chkp-aviads/swift-nio-http2.git", from: "1.40.2"),
         .package(url: "https://github.com/apple/swift-http-types.git", from: "1.3.0"),
         .package(url: "https://github.com/apple/swift-http-structured-headers.git", from: "1.2.0"),
         .package(url: "https://github.com/apple/swift-atomics.git", from: "1.2.0"),
         .package(url: "https://github.com/apple/swift-algorithms.git", from: "1.2.0"),
-        .package(url: "https://github.com/apple/swift-certificates.git", from: "1.10.0"),
-        .package(url: "https://github.com/chkp-aviads/swift-nio-ssl.git", from: "2.36.1"),
+        .package(url: "https://github.com/apple/swift-certificates.git", from: "1.14.0"),
+        .package(url: "https://github.com/chkp-aviads/swift-nio-ssl.git", from: "2.36.4"),
         .package(url: "https://github.com/apple/swift-asn1.git", from: "1.3.1"),
         .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.8.0"),
         .package(url: "https://github.com/apple/swift-async-algorithms.git", from: "1.0.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.6.3"),
+        .package(url: "https://github.com/apple/swift-crypto.git", "3.0.0"..<"5.0.0"),
 
     ],
     targets: targets
