@@ -37,8 +37,17 @@ private func qValueFromHeader<S: StringProtocol>(_ text: S) -> Float {
         return 1
     }
 
-    // We have a Q value.
-    let qValue = Float(headerParts[1].split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)[1]) ?? 0
+    // We might have a Q value.
+    let qParts = headerParts[1].split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+
+    // A parameter without a value (e.g. "gzip;q") is malformed; treat as q=0.
+    guard qParts.count > 1 else { return 0 }
+
+    // Check the left hand side is a "q" or a "Q".
+    guard let qChar = qParts[0].utf8.first, qParts[0].utf8.count == 1 else { return 0 }
+    guard qChar == UInt8(ascii: "q") || qChar == UInt8(ascii: "Q") else { return 0 }
+
+    let qValue = Float(qParts[1]) ?? 0
     if qValue < 0 || qValue > 1 || qValue.isNaN {
         return 0
     }
@@ -117,7 +126,7 @@ public final class HTTPResponseCompressor: ChannelDuplexHandler, RemovableChanne
         case noDataToWrite
     }
 
-    private var compressor: NIOCompression.Compressor
+    private let compressor: NIOCompression.Compressor
 
     // A queue of accept headers.
     private var acceptQueue = CircularBuffer<[Substring]>(initialCapacity: 8)
@@ -261,7 +270,7 @@ public final class HTTPResponseCompressor: ChannelDuplexHandler, RemovableChanne
     ///
     /// Called either when a HTTP end message is received or our flush() method is called.
     private func emitPendingWrites(context: ChannelHandlerContext) {
-        let writesToEmit = pendingResponse.flush(compressor: &compressor, allocator: context.channel.allocator)
+        let writesToEmit = pendingResponse.flush(compressor: compressor, allocator: context.channel.allocator)
         var pendingPromise = pendingWritePromise
 
         if let writeHead = writesToEmit.0 {
@@ -363,7 +372,7 @@ private struct PartialHTTPResponse {
     /// Calling this function resets the buffer, freeing any excess memory allocated in the internal
     /// buffer and losing all copies of the other HTTP data. At this point it may freely be reused.
     mutating func flush(
-        compressor: inout NIOCompression.Compressor,
+        compressor: NIOCompression.Compressor,
         allocator: ByteBufferAllocator
     ) -> (HTTPResponseHead?, ByteBuffer?, HTTPServerResponsePart?) {
         var outputBody: ByteBuffer? = nil
