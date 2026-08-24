@@ -100,6 +100,28 @@ var targets: [PackageDescription.Target] = [
         ],
         swiftSettings: strictConcurrencySettings
     ),
+    .target(
+        name: "NIOShadowsocks",
+        dependencies: [
+            .product(name: "NIO", package: "swift-nio"),
+            .product(name: "NIOCore", package: "swift-nio"),
+            .product(name: "Crypto", package: "swift-crypto"),
+            .product(name: "_CryptoExtras", package: "swift-crypto"),
+            .product(name: "Logging", package: "swift-log"),
+        ],
+        swiftSettings: strictConcurrencySettings
+    ),
+    .target(
+        name: "NIOShadowsocksTestUtils",
+        dependencies: [
+            "NIOShadowsocks",
+            .product(name: "NIO", package: "swift-nio"),
+            .product(name: "NIOCore", package: "swift-nio"),
+            .product(name: "NIOPosix", package: "swift-nio"),
+            .product(name: "Crypto", package: "swift-crypto"),
+        ],
+        swiftSettings: strictConcurrencySettings
+    ),
     .executableTarget(
         name: "NIOSOCKSClient",
         dependencies: [
@@ -151,6 +173,18 @@ var targets: [PackageDescription.Target] = [
             "NIOSOCKS",
             .product(name: "NIOCore", package: "swift-nio"),
             .product(name: "NIOEmbedded", package: "swift-nio"),
+        ],
+        swiftSettings: strictConcurrencySettings
+    ),
+    .testTarget(
+        name: "NIOShadowsocksTests",
+        dependencies: [
+            "NIOShadowsocks",
+            "NIOShadowsocksTestUtils",
+            .product(name: "NIOCore", package: "swift-nio"),
+            .product(name: "NIOEmbedded", package: "swift-nio"),
+            .product(name: "NIOPosix", package: "swift-nio"),
+            .product(name: "Crypto", package: "swift-crypto"),
         ],
         swiftSettings: strictConcurrencySettings
     ),
@@ -320,6 +354,8 @@ let package = Package(
     products: [
         .library(name: "NIOExtras", targets: ["NIOExtras"]),
         .library(name: "NIOSOCKS", targets: ["NIOSOCKS"]),
+        .library(name: "NIOShadowsocks", targets: ["NIOShadowsocks"]),
+        .library(name: "NIOShadowsocksTestUtils", targets: ["NIOShadowsocksTestUtils"]),
         .library(name: "NIOHTTPCompression", targets: ["NIOHTTPCompression"]),
         .library(name: "NIOHTTPTypes", targets: ["NIOHTTPTypes"]),
         .library(name: "NIOHTTPTypesHTTP1", targets: ["NIOHTTPTypesHTTP1"]),
