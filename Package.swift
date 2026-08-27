@@ -351,6 +351,7 @@ var targets: [PackageDescription.Target] = [
 
 let package = Package(
     name: "swift-nio-extras",
+    platforms: [.macOS(.v10_15), .iOS(.v13), .tvOS(.v13), .watchOS(.v6)],
     products: [
         .library(name: "NIOExtras", targets: ["NIOExtras"]),
         .library(name: "NIOSOCKS", targets: ["NIOSOCKS"]),
