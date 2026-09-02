@@ -12,6 +12,11 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Bionic's libc is not re-exported by Foundation the way Darwin's is, so the raw
+// syscalls this file uses need it imported explicitly.
+#if canImport(Android)
+import Android
+#endif
 import HTTPTypes
 import NIOCore
 import NIOEmbedded

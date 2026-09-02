@@ -26,6 +26,10 @@ import Crypto
 
 #if canImport(FoundationEssentials)
 import FoundationEssentials
+// CharacterSet and trimmingCharacters(in:) are in full Foundation, not
+// FoundationEssentials. On Android canImport(FoundationEssentials) is true, so
+// without this the password parser below stops compiling.
+import Foundation
 #else
 import Foundation
 #endif
